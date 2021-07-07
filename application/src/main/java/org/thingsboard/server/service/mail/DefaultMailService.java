@@ -16,32 +16,37 @@
 package org.thingsboard.server.service.mail;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import freemarker.template.Configuration;
+import freemarker.template.Template;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.velocity.VelocityContext;
-import org.apache.velocity.app.VelocityEngine;
-import org.apache.velocity.exception.VelocityException;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.MessageSource;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.NestedRuntimeException;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.ui.freemarker.FreeMarkerTemplateUtils;
 import org.thingsboard.rule.engine.api.MailService;
 import org.thingsboard.server.common.data.AdminSettings;
+import org.thingsboard.server.common.data.ApiFeature;
+import org.thingsboard.server.common.data.ApiUsageRecordKey;
+import org.thingsboard.server.common.data.ApiUsageStateMailMessage;
+import org.thingsboard.server.common.data.ApiUsageStateValue;
 import org.thingsboard.server.common.data.exception.ThingsboardErrorCode;
 import org.thingsboard.server.common.data.exception.ThingsboardException;
 import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.dao.exception.IncorrectParameterException;
 import org.thingsboard.server.dao.settings.AdminSettingsService;
+import org.thingsboard.server.queue.usagestats.TbApiUsageClient;
+import org.thingsboard.server.service.apiusage.TbApiUsageStateService;
 
 import javax.annotation.PostConstruct;
 import javax.mail.MessagingException;
 import javax.mail.internet.MimeMessage;
-import java.io.StringWriter;
-import java.io.Writer;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -54,19 +59,28 @@ public class DefaultMailService implements MailService {
     public static final String MAIL_PROP = "mail.";
     public static final String TARGET_EMAIL = "targetEmail";
     public static final String UTF_8 = "UTF-8";
-    @Autowired
-    private MessageSource messages;
+    public static final int _10K = 10000;
+    public static final int _1M = 1000000;
 
+    private final MessageSource messages;
+    private final Configuration freemarkerConfig;
+    private final AdminSettingsService adminSettingsService;
+    private final TbApiUsageClient apiUsageClient;
+
+    @Lazy
     @Autowired
-    @Qualifier("velocityEngine")
-    private VelocityEngine engine;
+    private TbApiUsageStateService apiUsageStateService;
 
     private JavaMailSenderImpl mailSender;
 
     private String mailFrom;
 
-    @Autowired
-    private AdminSettingsService adminSettingsService;
+    public DefaultMailService(MessageSource messages, Configuration freemarkerConfig, AdminSettingsService adminSettingsService, TbApiUsageClient apiUsageClient) {
+        this.messages = messages;
+        this.freemarkerConfig = freemarkerConfig;
+        this.adminSettingsService = adminSettingsService;
+        this.apiUsageClient = apiUsageClient;
+    }
 
     @PostConstruct
     private void init() {
@@ -112,8 +126,11 @@ public class DefaultMailService implements MailService {
             }
         }
         javaMailProperties.put(MAIL_PROP + protocol + ".starttls.enable", enableTls);
-        if (enableTls && jsonConfig.has("tlsVersion") && StringUtils.isNoneEmpty(jsonConfig.get("tlsVersion").asText())) {
-            javaMailProperties.put(MAIL_PROP + protocol + ".ssl.protocols", jsonConfig.get("tlsVersion").asText());
+        if (enableTls && jsonConfig.has("tlsVersion") && !jsonConfig.get("tlsVersion").isNull()) {
+            String tlsVersion = jsonConfig.get("tlsVersion").asText();
+            if (StringUtils.isNoneEmpty(tlsVersion)) {
+                javaMailProperties.put(MAIL_PROP + protocol + ".ssl.protocols", tlsVersion);
+            }
         }
 
         boolean enableProxy = jsonConfig.has("enableProxy") && jsonConfig.get("enableProxy").asBoolean();
@@ -142,7 +159,7 @@ public class DefaultMailService implements MailService {
     }
 
     @Override
-    public void sendEmail(String email, String subject, String message) throws ThingsboardException {
+    public void sendEmail(TenantId tenantId, String email, String subject, String message) throws ThingsboardException {
         sendMail(mailSender, mailFrom, email, subject, message);
     }
 
@@ -152,11 +169,10 @@ public class DefaultMailService implements MailService {
         String mailFrom = jsonConfig.get("mailFrom").asText();
         String subject = messages.getMessage("test.message.subject", null, Locale.US);
 
-        Map<String, Object> model = new HashMap<String, Object>();
+        Map<String, Object> model = new HashMap<>();
         model.put(TARGET_EMAIL, email);
 
-        String message = mergeTemplateIntoString(this.engine,
-                "test.vm", UTF_8, model);
+        String message = mergeTemplateIntoString("test.ftl", model);
 
         sendMail(testMailSender, mailFrom, email, subject, message);
     }
@@ -166,12 +182,11 @@ public class DefaultMailService implements MailService {
 
         String subject = messages.getMessage("activation.subject", null, Locale.US);
 
-        Map<String, Object> model = new HashMap<String, Object>();
+        Map<String, Object> model = new HashMap<>();
         model.put("activationLink", activationLink);
         model.put(TARGET_EMAIL, email);
 
-        String message = mergeTemplateIntoString(this.engine,
-                "activation.vm", UTF_8, model);
+        String message = mergeTemplateIntoString("activation.ftl", model);
 
         sendMail(mailSender, mailFrom, email, subject, message);
     }
@@ -181,12 +196,11 @@ public class DefaultMailService implements MailService {
 
         String subject = messages.getMessage("account.activated.subject", null, Locale.US);
 
-        Map<String, Object> model = new HashMap<String, Object>();
+        Map<String, Object> model = new HashMap<>();
         model.put("loginLink", loginLink);
         model.put(TARGET_EMAIL, email);
 
-        String message = mergeTemplateIntoString(this.engine,
-                "account.activated.vm", UTF_8, model);
+        String message = mergeTemplateIntoString("account.activated.ftl", model);
 
         sendMail(mailSender, mailFrom, email, subject, message);
     }
@@ -196,12 +210,11 @@ public class DefaultMailService implements MailService {
 
         String subject = messages.getMessage("reset.password.subject", null, Locale.US);
 
-        Map<String, Object> model = new HashMap<String, Object>();
+        Map<String, Object> model = new HashMap<>();
         model.put("passwordResetLink", passwordResetLink);
         model.put(TARGET_EMAIL, email);
 
-        String message = mergeTemplateIntoString(this.engine,
-                "reset.password.vm", UTF_8, model);
+        String message = mergeTemplateIntoString("reset.password.ftl", model);
 
         sendMail(mailSender, mailFrom, email, subject, message);
     }
@@ -211,46 +224,165 @@ public class DefaultMailService implements MailService {
 
         String subject = messages.getMessage("password.was.reset.subject", null, Locale.US);
 
-        Map<String, Object> model = new HashMap<String, Object>();
+        Map<String, Object> model = new HashMap<>();
         model.put("loginLink", loginLink);
         model.put(TARGET_EMAIL, email);
 
-        String message = mergeTemplateIntoString(this.engine,
-                "password.was.reset.vm", UTF_8, model);
+        String message = mergeTemplateIntoString("password.was.reset.ftl", model);
 
         sendMail(mailSender, mailFrom, email, subject, message);
     }
 
     @Override
-    public void send(String from, String to, String cc, String bcc, String subject, String body) throws MessagingException {
-        MimeMessage mailMsg = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(mailMsg, "UTF-8");
-        helper.setFrom(StringUtils.isBlank(from) ? mailFrom : from);
-        helper.setTo(to.split("\\s*,\\s*"));
-        if (!StringUtils.isBlank(cc)) {
-            helper.setCc(cc.split("\\s*,\\s*"));
+    public void send(TenantId tenantId, String from, String to, String cc, String bcc, String subject, String body) throws MessagingException {
+        if (apiUsageStateService.getApiUsageState(tenantId).isEmailSendEnabled()) {
+            MimeMessage mailMsg = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mailMsg, "UTF-8");
+            helper.setFrom(StringUtils.isBlank(from) ? mailFrom : from);
+            helper.setTo(to.split("\\s*,\\s*"));
+            if (!StringUtils.isBlank(cc)) {
+                helper.setCc(cc.split("\\s*,\\s*"));
+            }
+            if (!StringUtils.isBlank(bcc)) {
+                helper.setBcc(bcc.split("\\s*,\\s*"));
+            }
+            helper.setSubject(subject);
+            helper.setText(body);
+            mailSender.send(helper.getMimeMessage());
+            apiUsageClient.report(tenantId, ApiUsageRecordKey.EMAIL_EXEC_COUNT, 1);
+        } else {
+            throw new RuntimeException("Email sending is disabled due to API limits!");
         }
-        if (!StringUtils.isBlank(bcc)) {
-            helper.setBcc(bcc.split("\\s*,\\s*"));
-        }
-        helper.setSubject(subject);
-        helper.setText(body);
-        mailSender.send(helper.getMimeMessage());
     }
 
     @Override
     public void sendAccountLockoutEmail(String lockoutEmail, String email, Integer maxFailedLoginAttempts) throws ThingsboardException {
         String subject = messages.getMessage("account.lockout.subject", null, Locale.US);
 
-        Map<String, Object> model = new HashMap<String, Object>();
+        Map<String, Object> model = new HashMap<>();
         model.put("lockoutAccount", lockoutEmail);
         model.put("maxFailedLoginAttempts", maxFailedLoginAttempts);
         model.put(TARGET_EMAIL, email);
 
-        String message = mergeTemplateIntoString(this.engine,
-                "account.lockout.vm", UTF_8, model);
+        String message = mergeTemplateIntoString("account.lockout.ftl", model);
 
         sendMail(mailSender, mailFrom, email, subject, message);
+    }
+
+    @Override
+    public void sendApiFeatureStateEmail(ApiFeature apiFeature, ApiUsageStateValue stateValue, String email, ApiUsageStateMailMessage msg) throws ThingsboardException {
+        String subject = messages.getMessage("api.usage.state", null, Locale.US);
+
+        Map<String, Object> model = new HashMap<>();
+        model.put("apiFeature", apiFeature.getLabel());
+        model.put(TARGET_EMAIL, email);
+
+        String message = null;
+
+        switch (stateValue) {
+            case ENABLED:
+                model.put("apiLabel", toEnabledValueLabel(apiFeature));
+                message = mergeTemplateIntoString("state.enabled.ftl", model);
+                break;
+            case WARNING:
+                model.put("apiValueLabel", toDisabledValueLabel(apiFeature) + " " + toWarningValueLabel(msg.getKey(), msg.getValue(), msg.getThreshold()));
+                message = mergeTemplateIntoString("state.warning.ftl", model);
+                break;
+            case DISABLED:
+                model.put("apiLimitValueLabel", toDisabledValueLabel(apiFeature) + " " + toDisabledValueLabel(msg.getKey(), msg.getThreshold()));
+                message = mergeTemplateIntoString("state.disabled.ftl", model);
+                break;
+        }
+        sendMail(mailSender, mailFrom, email, subject, message);
+    }
+
+    private String toEnabledValueLabel(ApiFeature apiFeature) {
+        switch (apiFeature) {
+            case DB:
+                return "save";
+            case TRANSPORT:
+                return "receive";
+            case JS:
+                return "invoke";
+            case RE:
+                return "process";
+            case EMAIL:
+            case SMS:
+                return "send";
+            default:
+                throw new RuntimeException("Not implemented!");
+        }
+    }
+
+    private String toDisabledValueLabel(ApiFeature apiFeature) {
+        switch (apiFeature) {
+            case DB:
+                return "saved";
+            case TRANSPORT:
+                return "received";
+            case JS:
+                return "invoked";
+            case RE:
+                return "processed";
+            case EMAIL:
+            case SMS:
+                return "sent";
+            default:
+                throw new RuntimeException("Not implemented!");
+        }
+    }
+
+    private String toWarningValueLabel(ApiUsageRecordKey key, long value, long threshold) {
+        String valueInM = getValueAsString(value);
+        String thresholdInM = getValueAsString(threshold);
+        switch (key) {
+            case STORAGE_DP_COUNT:
+            case TRANSPORT_DP_COUNT:
+                return valueInM + " out of " + thresholdInM + " allowed data points";
+            case TRANSPORT_MSG_COUNT:
+                return valueInM + " out of " + thresholdInM + " allowed messages";
+            case JS_EXEC_COUNT:
+                return valueInM + " out of " + thresholdInM + " allowed JavaScript functions";
+            case RE_EXEC_COUNT:
+                return valueInM + " out of " + thresholdInM + " allowed Rule Engine messages";
+            case EMAIL_EXEC_COUNT:
+                return valueInM + " out of " + thresholdInM + " allowed Email messages";
+            case SMS_EXEC_COUNT:
+                return valueInM + " out of " + thresholdInM + " allowed SMS messages";
+            default:
+                throw new RuntimeException("Not implemented!");
+        }
+    }
+
+    private String toDisabledValueLabel(ApiUsageRecordKey key, long value) {
+        switch (key) {
+            case STORAGE_DP_COUNT:
+            case TRANSPORT_DP_COUNT:
+                return getValueAsString(value) + " data points";
+            case TRANSPORT_MSG_COUNT:
+                return getValueAsString(value) + " messages";
+            case JS_EXEC_COUNT:
+                return "JavaScript functions " + getValueAsString(value) + " times";
+            case RE_EXEC_COUNT:
+                return getValueAsString(value) + " Rule Engine messages";
+            case EMAIL_EXEC_COUNT:
+                return getValueAsString(value) + " Email messages";
+            case SMS_EXEC_COUNT:
+                return getValueAsString(value) + " SMS messages";
+            default:
+                throw new RuntimeException("Not implemented!");
+        }
+    }
+
+    @NotNull
+    private String getValueAsString(long value) {
+        if (value > _1M && value % _1M < _10K) {
+            return value / _1M + "M";
+        } else if (value > _10K) {
+            return String.format("%.2fM", ((double) value) / 1000000);
+        } else {
+            return value + "";
+        }
     }
 
     private void sendMail(JavaMailSenderImpl mailSender,
@@ -269,20 +401,14 @@ public class DefaultMailService implements MailService {
         }
     }
 
-    private static String mergeTemplateIntoString(VelocityEngine velocityEngine, String templateLocation,
-                                                  String encoding, Map<String, Object> model) throws VelocityException {
-
-        StringWriter result = new StringWriter();
-        mergeTemplate(velocityEngine, templateLocation, encoding, model, result);
-        return result.toString();
-    }
-
-    private static void mergeTemplate(
-            VelocityEngine velocityEngine, String templateLocation, String encoding,
-            Map<String, Object> model, Writer writer) throws VelocityException {
-
-        VelocityContext velocityContext = new VelocityContext(model);
-        velocityEngine.mergeTemplate(templateLocation, encoding, velocityContext, writer);
+    private String mergeTemplateIntoString(String templateLocation,
+                                           Map<String, Object> model) throws ThingsboardException {
+        try {
+            Template template = freemarkerConfig.getTemplate(templateLocation);
+            return FreeMarkerTemplateUtils.processTemplateIntoString(template, model);
+        } catch (Exception e) {
+            throw handleException(e);
+        }
     }
 
     protected ThingsboardException handleException(Exception exception) {

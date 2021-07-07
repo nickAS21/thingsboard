@@ -18,9 +18,12 @@ package org.thingsboard.server.dao.asset;
 import com.google.common.util.concurrent.ListenableFuture;
 import org.thingsboard.server.common.data.EntitySubtype;
 import org.thingsboard.server.common.data.asset.Asset;
+import org.thingsboard.server.common.data.asset.AssetInfo;
 import org.thingsboard.server.common.data.id.TenantId;
-import org.thingsboard.server.common.data.page.TextPageLink;
+import org.thingsboard.server.common.data.page.PageData;
+import org.thingsboard.server.common.data.page.PageLink;
 import org.thingsboard.server.dao.Dao;
+import org.thingsboard.server.dao.TenantEntityDao;
 
 import java.util.List;
 import java.util.Optional;
@@ -30,7 +33,16 @@ import java.util.UUID;
  * The Interface AssetDao.
  *
  */
-public interface AssetDao extends Dao<Asset> {
+public interface AssetDao extends Dao<Asset>, TenantEntityDao {
+
+    /**
+     * Find asset info by id.
+     *
+     * @param tenantId the tenant id
+     * @param assetId the asset id
+     * @return the asset info object
+     */
+    AssetInfo findAssetInfoById(TenantId tenantId, UUID assetId);
 
     /**
      * Save or update asset object
@@ -47,7 +59,16 @@ public interface AssetDao extends Dao<Asset> {
      * @param pageLink the page link
      * @return the list of asset objects
      */
-    List<Asset> findAssetsByTenantId(UUID tenantId, TextPageLink pageLink);
+    PageData<Asset> findAssetsByTenantId(UUID tenantId, PageLink pageLink);
+
+    /**
+     * Find asset infos by tenantId and page link.
+     *
+     * @param tenantId the tenantId
+     * @param pageLink the page link
+     * @return the list of asset info objects
+     */
+    PageData<AssetInfo> findAssetInfosByTenantId(UUID tenantId, PageLink pageLink);
 
     /**
      * Find assets by tenantId, type and page link.
@@ -57,7 +78,17 @@ public interface AssetDao extends Dao<Asset> {
      * @param pageLink the page link
      * @return the list of asset objects
      */
-    List<Asset> findAssetsByTenantIdAndType(UUID tenantId, String type, TextPageLink pageLink);
+    PageData<Asset> findAssetsByTenantIdAndType(UUID tenantId, String type, PageLink pageLink);
+
+    /**
+     * Find asset infos by tenantId, type and page link.
+     *
+     * @param tenantId the tenantId
+     * @param type the type
+     * @param pageLink the page link
+     * @return the list of asset info objects
+     */
+    PageData<AssetInfo> findAssetInfosByTenantIdAndType(UUID tenantId, String type, PageLink pageLink);
 
     /**
      * Find assets by tenantId and assets Ids.
@@ -76,7 +107,17 @@ public interface AssetDao extends Dao<Asset> {
      * @param pageLink the page link
      * @return the list of asset objects
      */
-    List<Asset> findAssetsByTenantIdAndCustomerId(UUID tenantId, UUID customerId, TextPageLink pageLink);
+    PageData<Asset> findAssetsByTenantIdAndCustomerId(UUID tenantId, UUID customerId, PageLink pageLink);
+
+    /**
+     * Find asset infos by tenantId, customerId and page link.
+     *
+     * @param tenantId the tenantId
+     * @param customerId the customerId
+     * @param pageLink the page link
+     * @return the list of asset info objects
+     */
+    PageData<AssetInfo> findAssetInfosByTenantIdAndCustomerId(UUID tenantId, UUID customerId, PageLink pageLink);
 
     /**
      * Find assets by tenantId, customerId, type and page link.
@@ -87,7 +128,18 @@ public interface AssetDao extends Dao<Asset> {
      * @param pageLink the page link
      * @return the list of asset objects
      */
-    List<Asset> findAssetsByTenantIdAndCustomerIdAndType(UUID tenantId, UUID customerId, String type, TextPageLink pageLink);
+    PageData<Asset> findAssetsByTenantIdAndCustomerIdAndType(UUID tenantId, UUID customerId, String type, PageLink pageLink);
+
+    /**
+     * Find asset infos by tenantId, customerId, type and page link.
+     *
+     * @param tenantId the tenantId
+     * @param customerId the customerId
+     * @param type the type
+     * @param pageLink the page link
+     * @return the list of asset info objects
+     */
+    PageData<AssetInfo> findAssetInfosByTenantIdAndCustomerIdAndType(UUID tenantId, UUID customerId, String type, PageLink pageLink);
 
     /**
      * Find assets by tenantId, customerId and assets Ids.

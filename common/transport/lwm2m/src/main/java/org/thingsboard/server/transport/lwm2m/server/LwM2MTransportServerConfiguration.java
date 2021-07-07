@@ -16,9 +16,7 @@
 package org.thingsboard.server.transport.lwm2m.server;
 
 import lombok.extern.slf4j.Slf4j;
-import org.eclipse.californium.core.network.config.NetworkConfig;
-import org.eclipse.leshan.core.model.ObjectLoader;
-import org.eclipse.leshan.core.model.ObjectModel;
+import org.eclipse.californium.scandium.config.DtlsConnectorConfig;
 import org.eclipse.leshan.core.node.codec.DefaultLwM2mNodeDecoder;
 import org.eclipse.leshan.core.node.codec.DefaultLwM2mNodeEncoder;
 import org.eclipse.leshan.core.node.codec.LwM2mNodeDecoder;
@@ -27,59 +25,78 @@ import org.eclipse.leshan.server.californium.LeshanServerBuilder;
 import org.eclipse.leshan.server.model.LwM2mModelProvider;
 import org.eclipse.leshan.server.model.VersionedModelProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
-import org.thingsboard.server.transport.lwm2m.server.adaptors.LwM2MProvider;
-import org.thingsboard.server.transport.lwm2m.utils.MagicLwM2mValueConverter;
+import org.springframework.context.annotation.Primary;
+import org.thingsboard.server.transport.lwm2m.secure.LwM2MSecurityMode;
+import org.thingsboard.server.transport.lwm2m.server.secure.LwM2MSetSecurityStoreServer;
+import org.thingsboard.server.transport.lwm2m.server.secure.LwM2mInMemorySecurityStore;
+import org.thingsboard.server.transport.lwm2m.utils.LwM2mValueConverterImpl;
+import static org.thingsboard.server.transport.lwm2m.secure.LwM2MSecurityMode.X509;
+import static org.thingsboard.server.transport.lwm2m.secure.LwM2MSecurityMode.RPK;
+import static org.thingsboard.server.transport.lwm2m.server.LwM2MTransportHandler.getCoapConfig;
 
-import java.io.File;
-import java.util.List;
 
 @Slf4j
-@Configuration
+@ComponentScan("org.thingsboard.server.transport.lwm2m.server")
+@ComponentScan("org.thingsboard.server.transport.lwm2m.utils")
+@Configuration("LwM2MTransportServerConfiguration")
+@ConditionalOnExpression("('${service.type:null}'=='tb-transport' && '${transport.lwm2m.enabled:false}'=='true' ) || ('${service.type:null}'=='monolith' && '${transport.lwm2m.enabled}'=='true')")
 public class LwM2MTransportServerConfiguration {
 
     @Autowired
-    private LwM2MTransportCtx ctx;
+    private LwM2MTransportContextServer context;
 
-    private final static String[] modelPaths = LwM2MProvider.modelPaths;
+    @Autowired
+    private LwM2mInMemorySecurityStore lwM2mInMemorySecurityStore;
 
-    @Bean
-    public LeshanServer getLeshanServer() {
-        log.info("Starting LwM2M transport... PostConstruct");
+    @Primary
+    @Bean(name = "LeshanServerCert")
+    public LeshanServer getLeshanServerCert() {
+        log.info("Starting LwM2M transport ServerCert... PostConstruct");
+        return getLeshanServer(this.context.getCtxServer().getServerPortCert(), this.context.getCtxServer().getServerSecurePortCert(), X509);
+    }
+
+    @Bean(name = "leshanServerNoSecPskRpk")
+    public LeshanServer getLeshanServerNoSecPskRpk() {
+        log.info("Starting LwM2M transport ServerNoSecPskRpk... PostConstruct");
+        return getLeshanServer(this.context.getCtxServer().getServerPort(), this.context.getCtxServer().getServerSecurePort(), RPK);
+    }
+
+    private LeshanServer getLeshanServer(Integer serverPort, Integer serverSecurePort, LwM2MSecurityMode dtlsMode) {
+
         LeshanServerBuilder builder = new LeshanServerBuilder();
-        builder.setLocalAddress(ctx.getHost(), ctx.getPort());
-        builder.setLocalSecureAddress(ctx.getSecureHost(), ctx.getSecurePort());
+        builder.setLocalAddress(this.context.getCtxServer().getServerHost(), serverPort);
+        builder.setLocalSecureAddress(this.context.getCtxServer().getServerSecureHost(), serverSecurePort);
         builder.setEncoder(new DefaultLwM2mNodeEncoder());
         LwM2mNodeDecoder decoder = new DefaultLwM2mNodeDecoder();
         builder.setDecoder(decoder);
+        builder.setEncoder(new DefaultLwM2mNodeEncoder(new LwM2mValueConverterImpl()));
 
-        // Create CoAP Config
-        NetworkConfig coapConfig;
-        File configFile = new File(NetworkConfig.DEFAULT_FILE_NAME);
-        if (configFile.isFile()) {
-            coapConfig = new NetworkConfig();
-            coapConfig.load(configFile);
-        } else {
-            coapConfig = LeshanServerBuilder.createDefaultNetworkConfig();
-            coapConfig.store(configFile);
-        }
-        builder.setCoapConfig(coapConfig);
+        /** Create CoAP Config */
+        builder.setCoapConfig(getCoapConfig());
 
-        // Define model provider
-        List<ObjectModel> models = ObjectLoader.loadDefault();
-        models.addAll(ObjectLoader.loadDdfResources("/models/", modelPaths));
-        String modelsFolderPath = null;
-        if (modelsFolderPath != null) {
-            models.addAll(ObjectLoader.loadObjectsFromDir(new File(modelsFolderPath)));
-        }
-        LwM2mModelProvider modelProvider = new VersionedModelProvider(models);
+        /** Define model provider (Create Models )*/
+        LwM2mModelProvider modelProvider = new VersionedModelProvider(this.context.getCtxServer().getModelsValue());
         builder.setObjectModelProvider(modelProvider);
 
-//         use a magic converter to support bad type send by the UI.
-        builder.setEncoder(new DefaultLwM2mNodeEncoder(new MagicLwM2mValueConverter()));
+        /** Create DTLS Config */
+        DtlsConnectorConfig.Builder dtlsConfig = new DtlsConnectorConfig.Builder();
+        dtlsConfig.setRecommendedCipherSuitesOnly(this.context.getCtxServer().isSupportDeprecatedCiphersEnable());
+        /** Set DTLS Config */
+        builder.setDtlsConfig(dtlsConfig);
 
-        // Create and start LWM2M server
+        /** Use a magic converter to support bad type send by the UI. */
+        builder.setEncoder(new DefaultLwM2mNodeEncoder(new LwM2mValueConverterImpl()));
+
+        /**  Create DTLS security mode
+         * There can be only one DTLS security mode
+         */
+        new LwM2MSetSecurityStoreServer(builder, context, lwM2mInMemorySecurityStore, dtlsMode);
+
+        /** Create LWM2M server */
         return builder.build();
     }
 }

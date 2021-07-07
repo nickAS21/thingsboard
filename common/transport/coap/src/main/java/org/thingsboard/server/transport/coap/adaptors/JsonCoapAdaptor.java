@@ -125,8 +125,18 @@ public class JsonCoapAdaptor implements CoapTransportAdaptor {
     }
 
     @Override
+    public TransportProtos.ProvisionDeviceRequestMsg convertToProvisionRequestMsg(UUID sessionId, Request inbound) throws AdaptorException {
+        String payload = validatePayload(sessionId, inbound, false);
+        try {
+            return JsonConverter.convertToProvisionRequestMsg(payload);
+        } catch (IllegalStateException | JsonSyntaxException ex) {
+            throw new AdaptorException(ex);
+        }
+    }
+
+    @Override
     public Response convertToPublish(CoapTransportResource.CoapSessionListener session, TransportProtos.GetAttributeResponseMsg msg) throws AdaptorException {
-        if (msg.getClientAttributeListCount() == 0 && msg.getSharedAttributeListCount() == 0 && msg.getDeletedAttributeKeysCount() == 0) {
+        if (msg.getClientAttributeListCount() == 0 && msg.getSharedAttributeListCount() == 0) {
             return new Response(CoAP.ResponseCode.NOT_FOUND);
         } else {
             Response response = new Response(CoAP.ResponseCode.CONTENT);

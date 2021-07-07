@@ -15,17 +15,18 @@
  */
 package org.thingsboard.server.dao.rule;
 
-import org.thingsboard.server.common.data.page.TextPageLink;
+import org.thingsboard.server.common.data.page.PageData;
+import org.thingsboard.server.common.data.page.PageLink;
 import org.thingsboard.server.common.data.rule.RuleChain;
 import org.thingsboard.server.dao.Dao;
+import org.thingsboard.server.dao.TenantEntityDao;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
  * Created by igor on 3/12/18.
  */
-public interface RuleChainDao extends Dao<RuleChain> {
+public interface RuleChainDao extends Dao<RuleChain>, TenantEntityDao {
 
     /**
      * Find rule chains by tenantId and page link.
@@ -34,6 +35,5 @@ public interface RuleChainDao extends Dao<RuleChain> {
      * @param pageLink the page link
      * @return the list of rule chain objects
      */
-    List<RuleChain> findRuleChainsByTenantId(UUID tenantId, TextPageLink pageLink);
-
+    PageData<RuleChain> findRuleChainsByTenantId(UUID tenantId, PageLink pageLink);
 }

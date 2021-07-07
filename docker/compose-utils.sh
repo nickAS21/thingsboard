@@ -22,11 +22,11 @@ function additionalComposeArgs() {
         postgres)
         ADDITIONAL_COMPOSE_ARGS="-f docker-compose.postgres.yml"
         ;;
-        cassandra)
-        ADDITIONAL_COMPOSE_ARGS="-f docker-compose.cassandra.yml"
+        hybrid)
+        ADDITIONAL_COMPOSE_ARGS="-f docker-compose.hybrid.yml"
         ;;
         *)
-        echo "Unknown DATABASE value specified: '${DATABASE}'. Should be either postgres or cassandra." >&2
+        echo "Unknown DATABASE value specified: '${DATABASE}'. Should be either postgres or hybrid." >&2
         exit 1
     esac
     echo $ADDITIONAL_COMPOSE_ARGS
@@ -38,6 +38,9 @@ function additionalComposeQueueArgs() {
     case $TB_QUEUE_TYPE in
         kafka)
         ADDITIONAL_COMPOSE_QUEUE_ARGS="-f docker-compose.kafka.yml"
+        ;;
+        confluent)
+        ADDITIONAL_COMPOSE_QUEUE_ARGS="-f docker-compose.confluent.yml"
         ;;
         aws-sqs)
         ADDITIONAL_COMPOSE_QUEUE_ARGS="-f docker-compose.aws-sqs.yml"
@@ -52,7 +55,7 @@ function additionalComposeQueueArgs() {
         ADDITIONAL_COMPOSE_QUEUE_ARGS="-f docker-compose.service-bus.yml"
         ;;
         *)
-        echo "Unknown Queue service value specified: '${TB_QUEUE_TYPE}'. Should be either kafka or aws-sqs or pubsub or rabbitmq or service-bus." >&2
+        echo "Unknown Queue service value specified: '${TB_QUEUE_TYPE}'. Should be either kafka or confluent or aws-sqs or pubsub or rabbitmq or service-bus." >&2
         exit 1
     esac
     echo $ADDITIONAL_COMPOSE_QUEUE_ARGS
@@ -65,11 +68,11 @@ function additionalStartupServices() {
         postgres)
         ADDITIONAL_STARTUP_SERVICES=postgres
         ;;
-        cassandra)
-        ADDITIONAL_STARTUP_SERVICES=cassandra
+        hybrid)
+        ADDITIONAL_STARTUP_SERVICES="postgres cassandra"
         ;;
         *)
-        echo "Unknown DATABASE value specified: '${DATABASE}'. Should be either postgres or cassandra." >&2
+        echo "Unknown DATABASE value specified: '${DATABASE}'. Should be either postgres or hybrid." >&2
         exit 1
     esac
     echo $ADDITIONAL_STARTUP_SERVICES

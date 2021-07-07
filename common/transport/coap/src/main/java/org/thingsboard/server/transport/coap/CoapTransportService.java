@@ -20,6 +20,7 @@ import org.eclipse.californium.core.CoapResource;
 import org.eclipse.californium.core.CoapServer;
 
 import org.eclipse.californium.core.network.CoapEndpoint;
+import org.eclipse.californium.core.network.CoapEndpoint.Builder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
@@ -31,7 +32,7 @@ import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 
 @Service("CoapTransportService")
-@ConditionalOnExpression("'${service.type:null}'=='tb-transport' || ('${service.type:null}'=='monolith' && '${transport.coap.enabled}'=='true')")
+@ConditionalOnExpression("'${service.type:null}'=='tb-transport' || ('${service.type:null}'=='monolith' && '${transport.api_enabled:true}'=='true' && '${transport.coap.enabled}'=='true')")
 @Slf4j
 public class CoapTransportService {
 
@@ -51,7 +52,11 @@ public class CoapTransportService {
         createResources();
         InetAddress addr = InetAddress.getByName(coapTransportContext.getHost());
         InetSocketAddress sockAddr = new InetSocketAddress(addr, coapTransportContext.getPort());
-//        server.addEndpoint(new CoapEndpoint(sockAddr));
+        Builder builder = new Builder();
+        builder.setInetSocketAddress(sockAddr);
+        CoapEndpoint coapEndpoint = builder.build();
+
+        server.addEndpoint(coapEndpoint);
         server.start();
         log.info("CoAP transport started!");
     }

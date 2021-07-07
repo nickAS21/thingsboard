@@ -15,6 +15,7 @@
  */
 package org.thingsboard.server.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -26,40 +27,34 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.thingsboard.server.common.data.Customer;
-import org.thingsboard.server.common.data.Dashboard;
-import org.thingsboard.server.common.data.DashboardInfo;
-import org.thingsboard.server.common.data.DataConstants;
-import org.thingsboard.server.common.data.Device;
-import org.thingsboard.server.common.data.EntityType;
-import org.thingsboard.server.common.data.EntityView;
-import org.thingsboard.server.common.data.HasName;
-import org.thingsboard.server.common.data.HasTenantId;
-import org.thingsboard.server.common.data.Tenant;
-import org.thingsboard.server.common.data.User;
+import org.thingsboard.server.common.data.*;
 import org.thingsboard.server.common.data.alarm.Alarm;
-import org.thingsboard.server.common.data.id.AlarmId;
 import org.thingsboard.server.common.data.alarm.AlarmInfo;
 import org.thingsboard.server.common.data.asset.Asset;
+import org.thingsboard.server.common.data.asset.AssetInfo;
 import org.thingsboard.server.common.data.audit.ActionType;
 import org.thingsboard.server.common.data.exception.ThingsboardErrorCode;
 import org.thingsboard.server.common.data.exception.ThingsboardException;
+import org.thingsboard.server.common.data.id.AlarmId;
 import org.thingsboard.server.common.data.id.AssetId;
 import org.thingsboard.server.common.data.id.CustomerId;
 import org.thingsboard.server.common.data.id.DashboardId;
 import org.thingsboard.server.common.data.id.DeviceId;
+import org.thingsboard.server.common.data.id.DeviceProfileId;
 import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.id.EntityIdFactory;
 import org.thingsboard.server.common.data.id.EntityViewId;
 import org.thingsboard.server.common.data.id.RuleChainId;
 import org.thingsboard.server.common.data.id.RuleNodeId;
 import org.thingsboard.server.common.data.id.TenantId;
+import org.thingsboard.server.common.data.id.TenantProfileId;
 import org.thingsboard.server.common.data.id.UserId;
 import org.thingsboard.server.common.data.id.WidgetTypeId;
 import org.thingsboard.server.common.data.id.WidgetsBundleId;
 import org.thingsboard.server.common.data.kv.AttributeKvEntry;
 import org.thingsboard.server.common.data.kv.DataType;
-import org.thingsboard.server.common.data.page.TextPageLink;
+import org.thingsboard.server.common.data.page.PageLink;
+import org.thingsboard.server.common.data.page.SortOrder;
 import org.thingsboard.server.common.data.page.TimePageLink;
 import org.thingsboard.server.common.data.plugin.ComponentDescriptor;
 import org.thingsboard.server.common.data.plugin.ComponentType;
@@ -70,7 +65,6 @@ import org.thingsboard.server.common.data.widget.WidgetsBundle;
 import org.thingsboard.server.common.msg.TbMsg;
 import org.thingsboard.server.common.msg.TbMsgDataType;
 import org.thingsboard.server.common.msg.TbMsgMetaData;
-import org.thingsboard.server.dao.alarm.AlarmService;
 import org.thingsboard.server.dao.asset.AssetService;
 import org.thingsboard.server.dao.attributes.AttributesService;
 import org.thingsboard.server.dao.audit.AuditLogService;
@@ -78,13 +72,17 @@ import org.thingsboard.server.dao.customer.CustomerService;
 import org.thingsboard.server.dao.dashboard.DashboardService;
 import org.thingsboard.server.dao.device.ClaimDevicesService;
 import org.thingsboard.server.dao.device.DeviceCredentialsService;
+import org.thingsboard.server.dao.device.DeviceProfileService;
 import org.thingsboard.server.dao.device.DeviceService;
 import org.thingsboard.server.dao.entityview.EntityViewService;
 import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.exception.IncorrectParameterException;
 import org.thingsboard.server.dao.model.ModelConstants;
+import org.thingsboard.server.dao.oauth2.OAuth2ConfigTemplateService;
+import org.thingsboard.server.dao.oauth2.OAuth2Service;
 import org.thingsboard.server.dao.relation.RelationService;
 import org.thingsboard.server.dao.rule.RuleChainService;
+import org.thingsboard.server.dao.tenant.TenantProfileService;
 import org.thingsboard.server.dao.tenant.TenantService;
 import org.thingsboard.server.dao.user.UserService;
 import org.thingsboard.server.dao.widget.WidgetTypeService;
@@ -94,16 +92,19 @@ import org.thingsboard.server.queue.discovery.PartitionService;
 import org.thingsboard.server.queue.provider.TbQueueProducerProvider;
 import org.thingsboard.server.queue.util.TbCoreComponent;
 import org.thingsboard.server.service.component.ComponentDiscoveryService;
+import org.thingsboard.server.service.lwm2m.LwM2MModelsRepository;
+import org.thingsboard.server.service.profile.TbDeviceProfileCache;
+import org.thingsboard.server.dao.tenant.TbTenantProfileCache;
 import org.thingsboard.server.service.queue.TbClusterService;
 import org.thingsboard.server.service.security.model.SecurityUser;
 import org.thingsboard.server.service.security.permission.AccessControlService;
 import org.thingsboard.server.service.security.permission.Operation;
 import org.thingsboard.server.service.security.permission.Resource;
 import org.thingsboard.server.service.state.DeviceStateService;
+import org.thingsboard.server.service.telemetry.AlarmSubscriptionService;
 import org.thingsboard.server.service.telemetry.TelemetrySubscriptionService;
 
 import javax.mail.MessagingException;
-import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.util.List;
 import java.util.Optional;
@@ -131,6 +132,9 @@ public abstract class BaseController {
     protected TenantService tenantService;
 
     @Autowired
+    protected TenantProfileService tenantProfileService;
+
+    @Autowired
     protected CustomerService customerService;
 
     @Autowired
@@ -140,10 +144,13 @@ public abstract class BaseController {
     protected DeviceService deviceService;
 
     @Autowired
+    protected DeviceProfileService deviceProfileService;
+
+    @Autowired
     protected AssetService assetService;
 
     @Autowired
-    protected AlarmService alarmService;
+    protected AlarmSubscriptionService alarmService;
 
     @Autowired
     protected DeviceCredentialsService deviceCredentialsService;
@@ -156,6 +163,12 @@ public abstract class BaseController {
 
     @Autowired
     protected DashboardService dashboardService;
+
+    @Autowired
+    protected OAuth2Service oAuth2Service;
+
+    @Autowired
+    protected OAuth2ConfigTemplateService oAuth2ConfigTemplateService;
 
     @Autowired
     protected ComponentDiscoveryService componentDescriptorService;
@@ -192,6 +205,15 @@ public abstract class BaseController {
 
     @Autowired
     protected TbQueueProducerProvider producerProvider;
+
+    @Autowired
+    protected TbTenantProfileCache tenantProfileCache;
+
+    @Autowired
+    protected TbDeviceProfileCache deviceProfileCache;
+
+    @Autowired
+    protected LwM2MModelsRepository lwM2MModelsRepository;
 
     @Value("${server.log_controller_error_stack_trace}")
     @Getter
@@ -264,21 +286,27 @@ public abstract class BaseController {
         return UUID.fromString(id);
     }
 
-    TimePageLink createPageLink(int limit, Long startTime, Long endTime, boolean ascOrder, String idOffset) {
-        UUID idOffsetUuid = null;
-        if (StringUtils.isNotEmpty(idOffset)) {
-            idOffsetUuid = toUUID(idOffset);
+    PageLink createPageLink(int pageSize, int page, String textSearch, String sortProperty, String sortOrder) throws ThingsboardException {
+        if (!StringUtils.isEmpty(sortProperty)) {
+            SortOrder.Direction direction = SortOrder.Direction.ASC;
+            if (!StringUtils.isEmpty(sortOrder)) {
+                try {
+                    direction = SortOrder.Direction.valueOf(sortOrder.toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    throw new ThingsboardException("Unsupported sort order '" + sortOrder + "'! Only 'ASC' or 'DESC' types are allowed.", ThingsboardErrorCode.BAD_REQUEST_PARAMS);
+                }
+            }
+            SortOrder sort = new SortOrder(sortProperty, direction);
+            return new PageLink(pageSize, page, textSearch, sort);
+        } else {
+            return new PageLink(pageSize, page, textSearch);
         }
-        return new TimePageLink(limit, startTime, endTime, ascOrder, idOffsetUuid);
     }
 
-
-    TextPageLink createPageLink(int limit, String textSearch, String idOffset, String textOffset) {
-        UUID idOffsetUuid = null;
-        if (StringUtils.isNotEmpty(idOffset)) {
-            idOffsetUuid = toUUID(idOffset);
-        }
-        return new TextPageLink(limit, textSearch, idOffsetUuid, textOffset);
+    TimePageLink createTimePageLink(int pageSize, int page, String textSearch,
+                                    String sortProperty, String sortOrder, Long startTime, Long endTime) throws ThingsboardException {
+        PageLink pageLink = this.createPageLink(pageSize, page, textSearch, sortProperty, sortOrder);
+        return new TimePageLink(pageLink, startTime, endTime);
     }
 
     protected SecurityUser getCurrentUser() throws ThingsboardException {
@@ -297,6 +325,30 @@ public abstract class BaseController {
             checkNotNull(tenant);
             accessControlService.checkPermission(getCurrentUser(), Resource.TENANT, operation, tenantId, tenant);
             return tenant;
+        } catch (Exception e) {
+            throw handleException(e, false);
+        }
+    }
+
+    TenantInfo checkTenantInfoId(TenantId tenantId, Operation operation) throws ThingsboardException {
+        try {
+            validateId(tenantId, INCORRECT_TENANT_ID + tenantId);
+            TenantInfo tenant = tenantService.findTenantInfoById(tenantId);
+            checkNotNull(tenant);
+            accessControlService.checkPermission(getCurrentUser(), Resource.TENANT, operation, tenantId, tenant);
+            return tenant;
+        } catch (Exception e) {
+            throw handleException(e, false);
+        }
+    }
+
+    TenantProfile checkTenantProfileId(TenantProfileId tenantProfileId, Operation operation) throws ThingsboardException {
+        try {
+            validateId(tenantProfileId, "Incorrect tenantProfileId " + tenantProfileId);
+            TenantProfile tenantProfile = tenantProfileService.findTenantProfileById(getTenantId(), tenantProfileId);
+            checkNotNull(tenantProfile);
+            accessControlService.checkPermission(getCurrentUser(), Resource.TENANT_PROFILE, operation);
+            return tenantProfile;
         } catch (Exception e) {
             throw handleException(e, false);
         }
@@ -330,19 +382,37 @@ public abstract class BaseController {
         }
     }
 
+    protected <I extends EntityId, T extends HasTenantId> void checkEntity(I entityId, T entity, Resource resource) throws ThingsboardException {
+        if (entityId == null) {
+            accessControlService
+                    .checkPermission(getCurrentUser(), resource, Operation.CREATE, null, entity);
+        } else {
+            checkEntityId(entityId, Operation.WRITE);
+        }
+    }
+
     protected void checkEntityId(EntityId entityId, Operation operation) throws ThingsboardException {
         try {
             checkNotNull(entityId);
             validateId(entityId.getId(), "Incorrect entityId " + entityId);
             switch (entityId.getEntityType()) {
+                case ALARM:
+                    checkAlarmId(new AlarmId(entityId.getId()), operation);
+                    return;
                 case DEVICE:
                     checkDeviceId(new DeviceId(entityId.getId()), operation);
+                    return;
+                case DEVICE_PROFILE:
+                    checkDeviceProfileId(new DeviceProfileId(entityId.getId()), operation);
                     return;
                 case CUSTOMER:
                     checkCustomerId(new CustomerId(entityId.getId()), operation);
                     return;
                 case TENANT:
                     checkTenantId(new TenantId(entityId.getId()), operation);
+                    return;
+                case TENANT_PROFILE:
+                    checkTenantProfileId(new TenantProfileId(entityId.getId()), operation);
                     return;
                 case RULE_CHAIN:
                     checkRuleChain(new RuleChainId(entityId.getId()), operation);
@@ -361,6 +431,12 @@ public abstract class BaseController {
                     return;
                 case ENTITY_VIEW:
                     checkEntityViewId(new EntityViewId(entityId.getId()), operation);
+                    return;
+                case WIDGETS_BUNDLE:
+                    checkWidgetsBundleId(new WidgetsBundleId(entityId.getId()), operation);
+                    return;
+                case WIDGET_TYPE:
+                    checkWidgetTypeId(new WidgetTypeId(entityId.getId()), operation);
                     return;
                 default:
                     throw new IllegalArgumentException("Unsupported entity type: " + entityId.getEntityType());
@@ -382,6 +458,30 @@ public abstract class BaseController {
         }
     }
 
+    DeviceInfo checkDeviceInfoId(DeviceId deviceId, Operation operation) throws ThingsboardException {
+        try {
+            validateId(deviceId, "Incorrect deviceId " + deviceId);
+            DeviceInfo device = deviceService.findDeviceInfoById(getCurrentUser().getTenantId(), deviceId);
+            checkNotNull(device);
+            accessControlService.checkPermission(getCurrentUser(), Resource.DEVICE, operation, deviceId, device);
+            return device;
+        } catch (Exception e) {
+            throw handleException(e, false);
+        }
+    }
+
+    DeviceProfile checkDeviceProfileId(DeviceProfileId deviceProfileId, Operation operation) throws ThingsboardException {
+        try {
+            validateId(deviceProfileId, "Incorrect deviceProfileId " + deviceProfileId);
+            DeviceProfile deviceProfile = deviceProfileService.findDeviceProfileById(getCurrentUser().getTenantId(), deviceProfileId);
+            checkNotNull(deviceProfile);
+            accessControlService.checkPermission(getCurrentUser(), Resource.DEVICE_PROFILE, operation, deviceProfileId, deviceProfile);
+            return deviceProfile;
+        } catch (Exception e) {
+            throw handleException(e, false);
+        }
+    }
+
     protected EntityView checkEntityViewId(EntityViewId entityViewId, Operation operation) throws ThingsboardException {
         try {
             validateId(entityViewId, "Incorrect entityViewId " + entityViewId);
@@ -394,10 +494,34 @@ public abstract class BaseController {
         }
     }
 
+    EntityViewInfo checkEntityViewInfoId(EntityViewId entityViewId, Operation operation) throws ThingsboardException {
+        try {
+            validateId(entityViewId, "Incorrect entityViewId " + entityViewId);
+            EntityViewInfo entityView = entityViewService.findEntityViewInfoById(getCurrentUser().getTenantId(), entityViewId);
+            checkNotNull(entityView);
+            accessControlService.checkPermission(getCurrentUser(), Resource.ENTITY_VIEW, operation, entityViewId, entityView);
+            return entityView;
+        } catch (Exception e) {
+            throw handleException(e, false);
+        }
+    }
+
     Asset checkAssetId(AssetId assetId, Operation operation) throws ThingsboardException {
         try {
             validateId(assetId, "Incorrect assetId " + assetId);
             Asset asset = assetService.findAssetById(getCurrentUser().getTenantId(), assetId);
+            checkNotNull(asset);
+            accessControlService.checkPermission(getCurrentUser(), Resource.ASSET, operation, assetId, asset);
+            return asset;
+        } catch (Exception e) {
+            throw handleException(e, false);
+        }
+    }
+
+    AssetInfo checkAssetInfoId(AssetId assetId, Operation operation) throws ThingsboardException {
+        try {
+            validateId(assetId, "Incorrect assetId " + assetId);
+            AssetInfo asset = assetService.findAssetInfoById(getCurrentUser().getTenantId(), assetId);
             checkNotNull(asset);
             accessControlService.checkPermission(getCurrentUser(), Resource.ASSET, operation, assetId, asset);
             return asset;
@@ -577,6 +701,18 @@ public abstract class BaseController {
             case ALARM_CLEAR:
                 msgType = DataConstants.ALARM_CLEAR;
                 break;
+            case ASSIGNED_FROM_TENANT:
+                msgType = DataConstants.ENTITY_ASSIGNED_FROM_TENANT;
+                break;
+            case ASSIGNED_TO_TENANT:
+                msgType = DataConstants.ENTITY_ASSIGNED_TO_TENANT;
+                break;
+            case PROVISION_SUCCESS:
+                msgType = DataConstants.PROVISION_SUCCESS;
+                break;
+            case PROVISION_FAILURE:
+                msgType = DataConstants.PROVISION_FAILURE;
+                break;
         }
         if (!StringUtils.isEmpty(msgType)) {
             try {
@@ -596,6 +732,16 @@ public abstract class BaseController {
                     String strCustomerName = extractParameter(String.class, 2, additionalInfo);
                     metaData.putValue("unassignedCustomerId", strCustomerId);
                     metaData.putValue("unassignedCustomerName", strCustomerName);
+                } else if (actionType == ActionType.ASSIGNED_FROM_TENANT) {
+                    String strTenantId = extractParameter(String.class, 0, additionalInfo);
+                    String strTenantName = extractParameter(String.class, 1, additionalInfo);
+                    metaData.putValue("assignedFromTenantId", strTenantId);
+                    metaData.putValue("assignedFromTenantName", strTenantName);
+                } else if (actionType == ActionType.ASSIGNED_TO_TENANT) {
+                    String strTenantId = extractParameter(String.class, 0, additionalInfo);
+                    String strTenantName = extractParameter(String.class, 1, additionalInfo);
+                    metaData.putValue("assignedToTenantId", strTenantId);
+                    metaData.putValue("assignedToTenantName", strTenantName);
                 }
                 ObjectNode entityNode;
                 if (entity != null) {
@@ -659,5 +805,13 @@ public abstract class BaseController {
         return result;
     }
 
+    protected <E extends HasName> String entityToStr(E entity) {
+        try {
+            return json.writeValueAsString(json.valueToTree(entity));
+        } catch (JsonProcessingException e) {
+            log.warn("[{}] Failed to convert entity to string!", entity, e);
+        }
+        return null;
+    }
 
 }

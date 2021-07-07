@@ -56,7 +56,9 @@ public class TbRuleEngineProcessingStrategyFactory {
         private final boolean retryTimeout;
         private final int maxRetries;
         private final double maxAllowedFailurePercentage;
-        private final long pauseBetweenRetries;
+        private final long maxPauseBetweenRetries;
+
+        private long pauseBetweenRetries;
 
         private int initialTotalCount;
         private int retryCount;
@@ -69,6 +71,7 @@ public class TbRuleEngineProcessingStrategyFactory {
             this.maxRetries = configuration.getRetries();
             this.maxAllowedFailurePercentage = configuration.getFailurePercentage();
             this.pauseBetweenRetries = configuration.getPauseBetweenRetries();
+            this.maxPauseBetweenRetries = configuration.getMaxPauseBetweenRetries();
         }
 
         @Override
@@ -100,13 +103,16 @@ public class TbRuleEngineProcessingStrategyFactory {
                     }
                     log.debug("[{}] Going to reprocess {} messages", queueName, toReprocess.size());
                     if (log.isTraceEnabled()) {
-                        toReprocess.forEach((id, msg) -> log.trace("Going to reprocess [{}]: {}", id, TbMsg.fromBytes(msg.getValue().getTbMsg().toByteArray(), TbMsgCallback.EMPTY)));
+                        toReprocess.forEach((id, msg) -> log.trace("Going to reprocess [{}]: {}", id, TbMsg.fromBytes(result.getQueueName(), msg.getValue().getTbMsg().toByteArray(), TbMsgCallback.EMPTY)));
                     }
                     if (pauseBetweenRetries > 0) {
                         try {
                             Thread.sleep(TimeUnit.SECONDS.toMillis(pauseBetweenRetries));
                         } catch (InterruptedException e) {
                             throw new RuntimeException(e);
+                        }
+                        if (maxPauseBetweenRetries > pauseBetweenRetries) {
+                            pauseBetweenRetries = Math.min(maxPauseBetweenRetries, pauseBetweenRetries * 2);
                         }
                     }
                     return new TbRuleEngineProcessingDecision(false, toReprocess);
@@ -129,10 +135,10 @@ public class TbRuleEngineProcessingStrategyFactory {
                 log.debug("[{}] Reprocessing skipped for {} failed and {} timeout messages", queueName, result.getFailedMap().size(), result.getPendingMap().size());
             }
             if (log.isTraceEnabled()) {
-                result.getFailedMap().forEach((id, msg) -> log.trace("Failed messages [{}]: {}", id, TbMsg.fromBytes(msg.getValue().getTbMsg().toByteArray(), TbMsgCallback.EMPTY)));
+                result.getFailedMap().forEach((id, msg) -> log.trace("Failed messages [{}]: {}", id, TbMsg.fromBytes(result.getQueueName(), msg.getValue().getTbMsg().toByteArray(), TbMsgCallback.EMPTY)));
             }
             if (log.isTraceEnabled()) {
-                result.getPendingMap().forEach((id, msg) -> log.trace("Timeout messages [{}]: {}", id, TbMsg.fromBytes(msg.getValue().getTbMsg().toByteArray(), TbMsgCallback.EMPTY)));
+                result.getPendingMap().forEach((id, msg) -> log.trace("Timeout messages [{}]: {}", id, TbMsg.fromBytes(result.getQueueName(), msg.getValue().getTbMsg().toByteArray(), TbMsgCallback.EMPTY)));
             }
             return new TbRuleEngineProcessingDecision(true, null);
         }

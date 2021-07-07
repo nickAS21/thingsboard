@@ -31,7 +31,12 @@ public enum Resource {
     RULE_CHAIN(EntityType.RULE_CHAIN),
     USER(EntityType.USER),
     WIDGETS_BUNDLE(EntityType.WIDGETS_BUNDLE),
-    WIDGET_TYPE(EntityType.WIDGET_TYPE);
+    WIDGET_TYPE(EntityType.WIDGET_TYPE),
+    OAUTH2_CONFIGURATION_INFO(),
+    OAUTH2_CONFIGURATION_TEMPLATE(),
+    TENANT_PROFILE(EntityType.TENANT_PROFILE),
+    DEVICE_PROFILE(EntityType.DEVICE_PROFILE),
+    API_USAGE_STATE(EntityType.API_USAGE_STATE);
 
     private final EntityType entityType;
 
@@ -45,5 +50,14 @@ public enum Resource {
 
     public Optional<EntityType> getEntityType() {
         return Optional.ofNullable(entityType);
+    }
+
+    public static Resource of(EntityType entityType) {
+        for (Resource resource : Resource.values()) {
+            if (resource.getEntityType().get() == entityType) {
+                return resource;
+            }
+        }
+        throw new IllegalArgumentException("Unknown EntityType: " + entityType.name());
     }
 }

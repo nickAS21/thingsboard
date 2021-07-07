@@ -16,45 +16,57 @@
 package org.thingsboard.server.transport.lwm2m.server;
 
 import lombok.extern.slf4j.Slf4j;
-import org.eclipse.californium.core.network.config.NetworkConfig;
-import org.eclipse.leshan.core.model.ObjectLoader;
-import org.eclipse.leshan.core.model.ObjectModel;
-import org.eclipse.leshan.core.node.codec.DefaultLwM2mNodeDecoder;
-import org.eclipse.leshan.core.node.codec.DefaultLwM2mNodeEncoder;
-import org.eclipse.leshan.core.node.codec.LwM2mNodeDecoder;
 import org.eclipse.leshan.server.californium.LeshanServer;
-import org.eclipse.leshan.server.californium.LeshanServerBuilder;
-import org.eclipse.leshan.server.model.LwM2mModelProvider;
-import org.eclipse.leshan.server.model.VersionedModelProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
-import org.thingsboard.server.transport.lwm2m.server.adaptors.LwM2MProvider;
-import org.thingsboard.server.transport.lwm2m.utils.MagicLwM2mValueConverter;
-
+import org.thingsboard.server.transport.lwm2m.secure.LWM2MGenerationPSkRPkECC;
+import org.thingsboard.server.transport.lwm2m.secure.LwM2MSecurityMode;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 
-@Service("LwM2MTransportServerInitializer")
-@ConditionalOnExpression("'${service.type:null}'=='tb-transport' || ('${service.type:null}'=='monolith' && '${transport.lwm2m.enabled}'=='true')")
 @Slf4j
+@Service("LwM2MTransportServerInitializer")
+@ConditionalOnExpression("('${service.type:null}'=='tb-transport' && '${transport.lwm2m.enabled:false}'=='true' ) || ('${service.type:null}'=='monolith' && '${transport.lwm2m.enabled}'=='true')")
 public class LwM2MTransportServerInitializer {
 
     @Autowired
-    private LeshanServer lhServer;
+    @Qualifier("LeshanServerCert")
+    private LeshanServer lhServerCert;
+
+    @Autowired
+    @Qualifier("leshanServerNoSecPskRpk")
+    private LeshanServer lhServerNoSecPskRpk;
+
+    @Autowired
+    private LwM2MTransportContextServer context;
 
     @PostConstruct
     public void init() {
-         this.lhServer.start();
+        if (this.context.getCtxServer().getEnableGenPskRpk()) new LWM2MGenerationPSkRPkECC();
+        if (this.context.getCtxServer().isServerStartAll()) {
+            this.lhServerCert.start();
+            this.lhServerNoSecPskRpk.start();
+        }
+        else {
+            if (this.context.getCtxServer().getServerDtlsMode() == LwM2MSecurityMode.X509.code) {
+                this.lhServerCert.start();
+            }
+            else {
+                this.lhServerNoSecPskRpk.start();
+            }
+        }
     }
 
     @PreDestroy
-    public void shutdown() throws InterruptedException {
-        log.info("Stopping LwM2M transport!");
+    public void shutdown() {
+        log.info("Stopping LwM2M transport Server!");
         try {
-            lhServer.destroy();
+            lhServerCert.destroy();
+            lhServerNoSecPskRpk.destroy();
         } finally {
         }
-        log.info("LwM2M transport stopped!");
+        log.info("LwM2M transport Server stopped!");
     }
 }
